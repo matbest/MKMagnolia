@@ -1,0 +1,52 @@
+{% extends "magnolias/base.html" %}
+{% block title %}MK Magnolia Sightings{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h2 mb-0">🌸 Milton Keynes Magnolia Sightings</h1>
+        <p class="text-muted mb-0">{{ magnolias.count }} sighting{{ magnolias.count|pluralize }} logged</p>
+    </div>
+    <a href="{% url 'magnolias:create' %}" class="btn btn-magnolia">+ Log a Magnolia</a>
+</div>
+
+{% if magnolias %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for magnolia in magnolias %}
+        <div class="col">
+            <div class="card h-100">
+                {% if magnolia.image %}
+                    <img src="{{ magnolia.image.url }}" class="card-img-top" alt="Photo of magnolia" style="height:200px;object-fit:cover;">
+                {% else %}
+                    <div class="card-img-top d-flex align-items-center justify-content-center bg-light" style="height:200px;font-size:4rem;">🌸</div>
+                {% endif %}
+                <div class="card-body">
+                    <h5 class="card-title">{{ magnolia.get_species_display }}</h5>
+                    <p class="card-text text-muted mb-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-geo-alt me-1" viewBox="0 0 16 16">
+                            <path d="M12.166 8.94c-.524 1.062-1.234 2.12-1.96 3.07A32 32 0 0 1 8 14.58a32 32 0 0 1-2.206-2.57c-.726-.95-1.436-2.008-1.96-3.07C3.304 7.867 3 6.862 3 6a5 5 0 0 1 10 0c0 .862-.305 1.867-.834 2.94"/>
+                            <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10m0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6"/>
+                        </svg>
+                        {{ magnolia.location_description }}
+                    </p>
+                    <p class="card-text mb-2">
+                        <small class="text-muted">Observed: {{ magnolia.date_observed }}</small>
+                    </p>
+                    <span class="badge badge-blooming rounded-pill">{{ magnolia.get_blooming_status_display }}</span>
+                </div>
+                <div class="card-footer bg-transparent d-flex justify-content-between align-items-center">
+                    <small class="text-muted">{% if magnolia.logged_by %}By {{ magnolia.logged_by }}{% else %}Anonymous{% endif %}</small>
+                    <a href="{{ magnolia.get_absolute_url }}" class="btn btn-sm btn-outline-secondary">View</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <div style="font-size:5rem;">🌱</div>
+        <h3 class="mt-3">No magnolias logged yet</h3>
+        <p class="text-muted">Be the first to log a magnolia sighting in Milton Keynes!</p>
+        <a href="{% url 'magnolias:create' %}" class="btn btn-magnolia mt-2">Log the first sighting</a>
+    </div>
+{% endif %}
+{% endblock %}

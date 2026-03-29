@@ -1,0 +1,73 @@
+{% extends "magnolias/base.html" %}
+{% block title %}{{ magnolia }} | MK Magnolia{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <nav aria-label="breadcrumb" class="mb-3">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'magnolias:list' %}">All Sightings</a></li>
+                <li class="breadcrumb-item active">Detail</li>
+            </ol>
+        </nav>
+
+        <div class="card">
+            {% if magnolia.image %}
+                <img src="{{ magnolia.image.url }}" class="card-img-top" alt="Photo of magnolia" style="max-height:400px;object-fit:cover;">
+            {% endif %}
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h1 class="h3 mb-1">{{ magnolia.get_species_display }}</h1>
+                        <span class="badge badge-blooming rounded-pill">{{ magnolia.get_blooming_status_display }}</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <a href="{% url 'magnolias:update' magnolia.pk %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        <a href="{% url 'magnolias:delete' magnolia.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
+                    </div>
+                </div>
+
+                <table class="table table-borderless mb-0">
+                    <tbody>
+                        <tr>
+                            <th class="text-muted" style="width:160px;">Location</th>
+                            <td>{{ magnolia.location_description }}</td>
+                        </tr>
+                        {% if magnolia.latitude and magnolia.longitude %}
+                        <tr>
+                            <th class="text-muted">Coordinates</th>
+                            <td>
+                                {{ magnolia.latitude }}, {{ magnolia.longitude }}
+                                <a href="https://www.openstreetmap.org/?mlat={{ magnolia.latitude }}&mlon={{ magnolia.longitude }}&zoom=16"
+                                   class="ms-2 small" target="_blank" rel="noopener">View on map ↗</a>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <th class="text-muted">Date Observed</th>
+                            <td>{{ magnolia.date_observed }}</td>
+                        </tr>
+                        {% if magnolia.notes %}
+                        <tr>
+                            <th class="text-muted">Notes</th>
+                            <td>{{ magnolia.notes|linebreaksbr }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <th class="text-muted">Logged by</th>
+                            <td>{% if magnolia.logged_by %}{{ magnolia.logged_by }}{% else %}Anonymous{% endif %}</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted">Logged on</th>
+                            <td>{{ magnolia.date_logged }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-3">
+            <a href="{% url 'magnolias:list' %}" class="btn btn-outline-secondary">&larr; Back to all sightings</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
