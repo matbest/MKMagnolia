@@ -251,6 +251,136 @@ def build_map(trees):
 # ── App layout ────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="MK Magnolia Map", page_icon="\U0001f338", layout="wide")
+
+# ── Custom CSS Theme ──────────────────────────────────────────────────────────
+
+_CUSTOM_CSS = """
+<style>
+    :root {
+        --magnolia-pink: #d8536d;
+        --magnolia-light-pink: #f4d4de;
+        --magnolia-green: #2d6a4f;
+        --magnolia-light-green: #74c476;
+        --magnolia-cream: #faf9f7;
+    }
+
+    * {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .appViewContainer {
+        background: linear-gradient(135deg, #faf9f7 0%, #f0e8e0 100%);
+    }
+
+    h1 {
+        color: var(--magnolia-green) !important;
+        font-weight: 700 !important;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.08) !important;
+        letter-spacing: -0.5px !important;
+    }
+
+    h2, h3 {
+        color: var(--magnolia-green) !important;
+        font-weight: 600 !important;
+    }
+
+    .stCaption {
+        color: #666 !important;
+        font-size: 0.95rem !important;
+    }
+
+    .stButton > button {
+        background: linear-gradient(135deg, var(--magnolia-green) 0%, #1f4d35 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        padding: 0.6rem 1.5rem !important;
+        box-shadow: 0 4px 12px rgba(45, 106, 79, 0.2) !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(45, 106, 79, 0.3) !important;
+    }
+
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input,
+    .stTextArea > div > div > textarea,
+    .stSelectbox > div > div {
+        border: 2px solid var(--magnolia-light-green) !important;
+        border-radius: 8px !important;
+        background-color: white !important;
+        font-size: 0.95rem !important;
+        padding: 0.7rem !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus {
+        border-color: var(--magnolia-pink) !important;
+        box-shadow: 0 0 0 3px rgba(216, 83, 109, 0.1) !important;
+    }
+
+    .stTabs > [data-baseweb="tab-list"] {
+        background-color: rgba(45, 106, 79, 0.05);
+        border-radius: 12px;
+        padding: 4px;
+        gap: 4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        color: var(--magnolia-green) !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: white !important;
+        box-shadow: 0 2px 8px rgba(45, 106, 79, 0.15) !important;
+    }
+
+    .streamlit-expanderHeader {
+        background-color: var(--magnolia-light-pink) !important;
+        border-radius: 8px !important;
+    }
+
+    .streamlit-expanderHeader:hover {
+        background-color: rgba(216, 83, 109, 0.15) !important;
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, rgba(45, 106, 79, 0.03) 0%, rgba(216, 83, 109, 0.03) 100%);
+    }
+
+    form {
+        background-color: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+    }
+
+    .stCheckbox > label {
+        font-weight: 500 !important;
+        color: var(--magnolia-green) !important;
+    }
+
+    a {
+        color: var(--magnolia-pink) !important;
+        text-decoration: none !important;
+        font-weight: 500 !important;
+    }
+
+    a:hover {
+        text-decoration: underline !important;
+    }
+</style>
+"""
+
+st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
+
 st.title("\U0001f338 Milton Keynes Magnolia Tree Map")
 st.caption("Hover over a green dot to preview the tree. Click to pin the card.")
 
@@ -287,6 +417,10 @@ if "username" not in st.session_state:
 if "google_token" not in st.session_state:
     st.session_state["google_token"] = None
 
+# Restore login from URL query params on page load/refresh
+if "user" in st.query_params and not st.session_state["username"]:
+    st.session_state["username"] = st.query_params["user"]
+
 with st.sidebar:
     st.header("\U0001f464 Account")
 
@@ -295,6 +429,7 @@ with st.sidebar:
         if st.button("Sign out", use_container_width=True):
             st.session_state["username"] = None
             st.session_state["google_token"] = None
+            st.query_params.clear()
             st.rerun()
     else:
         if not _CLIENT_ID or not _CLIENT_SECRET:
@@ -326,6 +461,7 @@ with st.sidebar:
                 identity = _extract_google_identity(result["token"])
                 if identity:
                     st.session_state["username"] = identity
+                    st.query_params["user"] = identity
                     st.rerun()
 
 tab_map, tab_add, tab_manage = st.tabs(["\U0001f5fa\ufe0f Map", "\u2795 Add Tree", "\U0001f4cb Manage Trees"])
