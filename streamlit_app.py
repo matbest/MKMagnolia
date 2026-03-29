@@ -5,8 +5,11 @@ import sqlite3
 import base64
 import json
 import os
+from pathlib import Path
+from urllib.request import Request, urlopen
 from datetime import datetime
 from PIL import Image
+from PIL.ExifTags import GPSTAGS, TAGS
 from io import BytesIO
 from streamlit_oauth import OAuth2Component
 
@@ -41,6 +44,51 @@ def _decode_id_token(id_token: str) -> dict:
     if padding != 4:
         payload_b64 += "=" * padding
     return json.loads(base64.urlsafe_b64decode(payload_b64))
+
+
+def _get_current_origin() -> str:
+    """Build origin from request host to avoid localhost/cloud redirect mismatches."""
+    try:
+        headers = getattr(st.context, "headers", {})
+        host = headers.get("host", "")
+    except Exception:
+        host = ""
+
+    if not host:
+        return ""
+
+    if host.startswith("localhost") or host.startswith("127.0.0.1"):
+        return f"http://{host}"
+    return f"https://{host}"
+
+
+def _extract_google_identity(token_dict: dict) -> str | None:
+    """Return an email/sub from OAuth token payload or Google userinfo endpoint."""
+    if not token_dict:
+        return None
+
+    id_token = token_dict.get("id_token")
+    if id_token:
+        try:
+            payload = _decode_id_token(id_token)
+            return payload.get("email") or payload.get("sub")
+        except Exception:
+            pass
+
+    access_token = token_dict.get("access_token")
+    if not access_token:
+        return None
+
+    try:
+        req = Request(
+            "https://openidconnect.googleapis.com/v1/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urlopen(req, timeout=8) as resp:
+            profile = json.loads(resp.read().decode("utf-8"))
+            return profile.get("email") or profile.get("sub")
+    except Exception:
+        return None
 
 
 def seed_sample_trees():
@@ -87,11 +135,72 @@ def delete_tree(tree_id):
 
 def compress_image(uploaded_file, max_px: int = 350) -> bytes:
     """Resize and JPEG-compress an uploaded image before storing in the DB."""
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
     img = Image.open(uploaded_file).convert("RGB")
     img.thumbnail((max_px, max_px), Image.LANCZOS)
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=78)
     return buf.getvalue()
+
+
+def _gps_to_decimal(coord, ref) -> float:
+    """Convert EXIF GPS coordinate tuple to signed decimal degrees."""
+
+    def _part_to_float(part):
+        if isinstance(part, tuple) and len(part) == 2 and part[1] != 0:
+            return float(part[0]) / float(part[1])
+        if hasattr(part, "numerator") and hasattr(part, "denominator") and part.denominator != 0:
+            return float(part.numerator) / float(part.denominator)
+        return float(part)
+
+    degrees = _part_to_float(coord[0])
+    minutes = _part_to_float(coord[1])
+    seconds = _part_to_float(coord[2])
+    decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+    if ref in ["S", "W"]:
+        decimal = -decimal
+    return decimal
+
+
+def get_exif_lat_lng(uploaded_file):
+    """Return (lat, lng) from EXIF GPS if present, otherwise None."""
+    if uploaded_file is None:
+        return None
+    try:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        img = Image.open(uploaded_file)
+        exif_data = img.getexif()
+        if not exif_data:
+            return None
+
+        gps_info = None
+        for tag_id, value in exif_data.items():
+            tag_name = TAGS.get(tag_id, tag_id)
+            if tag_name == "GPSInfo":
+                gps_info = value
+                break
+
+        if not gps_info:
+            return None
+
+        gps = {}
+        for key in gps_info:
+            name = GPSTAGS.get(key, key)
+            gps[name] = gps_info[key]
+
+        if all(k in gps for k in ["GPSLatitude", "GPSLatitudeRef", "GPSLongitude", "GPSLongitudeRef"]):
+            lat = _gps_to_decimal(gps["GPSLatitude"], gps["GPSLatitudeRef"])
+            lng = _gps_to_decimal(gps["GPSLongitude"], gps["GPSLongitudeRef"])
+            return round(lat, 6), round(lng, 6)
+    except Exception:
+        return None
+    finally:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+
+    return None
 
 
 def b64_img_tag(image_data: bytes, width: int = 210) -> str:
@@ -153,16 +262,30 @@ seed_sample_trees()
 try:
     _CLIENT_ID     = st.secrets["GOOGLE_CLIENT_ID"]
     _CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
-    _REDIRECT_URI  = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
+    _REDIRECT_URI  = st.secrets.get("REDIRECT_URI", "")
+    _LOCAL_REDIRECT_URI = st.secrets.get("LOCAL_REDIRECT_URI", "")
 except (KeyError, FileNotFoundError):
     _CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
     _CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    _REDIRECT_URI  = os.environ.get("REDIRECT_URI", "http://localhost:8501")
+    _REDIRECT_URI  = os.environ.get("REDIRECT_URI", "")
+    _LOCAL_REDIRECT_URI = os.environ.get("LOCAL_REDIRECT_URI", "")
+
+_ORIGIN = _get_current_origin()
+if _ORIGIN.startswith("http://"):
+    # Localhost run: prefer explicit local redirect setting, else use current localhost origin.
+    _EFFECTIVE_REDIRECT_URI = _LOCAL_REDIRECT_URI or f"{_ORIGIN}/"
+elif _ORIGIN:
+    # Cloud run: prefer explicit deploy redirect setting, else use current host origin.
+    _EFFECTIVE_REDIRECT_URI = _REDIRECT_URI or f"{_ORIGIN}/"
+else:
+    _EFFECTIVE_REDIRECT_URI = _REDIRECT_URI or "http://localhost:8501/"
 
 # ── Sidebar: Google login / logout ───────────────────────────────────────────
 
 if "username" not in st.session_state:
     st.session_state["username"] = None
+if "google_token" not in st.session_state:
+    st.session_state["google_token"] = None
 
 with st.sidebar:
     st.header("\U0001f464 Account")
@@ -171,6 +294,7 @@ with st.sidebar:
         st.success(f"Signed in as **{st.session_state['username']}**")
         if st.button("Sign out", use_container_width=True):
             st.session_state["username"] = None
+            st.session_state["google_token"] = None
             st.rerun()
     else:
         if not _CLIENT_ID or not _CLIENT_SECRET:
@@ -191,17 +315,17 @@ with st.sidebar:
             )
             result = oauth2.authorize_button(
                 name="Sign in with Google",
-                redirect_uri=_REDIRECT_URI,
+                redirect_uri=_EFFECTIVE_REDIRECT_URI,
                 scope="openid email profile",
                 key="google_login",
                 use_container_width=True,
                 icon="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg",
             )
             if result and "token" in result:
-                id_token = result["token"].get("id_token")
-                if id_token:
-                    payload = _decode_id_token(id_token)
-                    st.session_state["username"] = payload.get("email", payload.get("sub", "unknown"))
+                st.session_state["google_token"] = result["token"]
+                identity = _extract_google_identity(result["token"])
+                if identity:
+                    st.session_state["username"] = identity
                     st.rerun()
 
 tab_map, tab_add, tab_manage = st.tabs(["\U0001f5fa\ufe0f Map", "\u2795 Add Tree", "\U0001f4cb Manage Trees"])
@@ -223,8 +347,37 @@ with tab_add:
         "[Google Maps](https://maps.google.com) and copying the lat/lng."
     )
 
+    if "new_tree_lat" not in st.session_state:
+        st.session_state["new_tree_lat"] = 52.0406
+    if "new_tree_lng" not in st.session_state:
+        st.session_state["new_tree_lng"] = -0.7594
+
+    photo = st.file_uploader("Upload a photo (optional)", type=["jpg", "jpeg", "png", "webp"])
+    exif_coords = get_exif_lat_lng(photo)
+    if photo:
+        info_col, button_col = st.columns([5, 2])
+        with info_col:
+            st.caption(f"Selected photo: {photo.name}")
+        with button_col:
+            extract_pressed = st.button(
+                "Extract GPS",
+                key="extract_gps_button",
+                use_container_width=True,
+                disabled=not bool(exif_coords),
+            )
+
+        if extract_pressed and exif_coords:
+            st.session_state["new_tree_lat"] = exif_coords[0]
+            st.session_state["new_tree_lng"] = exif_coords[1]
+            st.rerun()
+
+        if exif_coords:
+            st.success(f"EXIF GPS found: {exif_coords[0]:.6f}, {exif_coords[1]:.6f}")
+        else:
+            st.info("No GPS EXIF metadata found in this image.")
+
     with st.form("add_tree_form", clear_on_submit=True):
-        name = st.text_input("Tree name / variety *", placeholder="e.g. Magnolia × soulangeana")
+        name = st.text_input("Tree name / variety", placeholder="e.g. Magnolia × soulangeana")
         description = st.text_area(
             "Description",
             placeholder="e.g. Large pink blooms near the lake entrance",
@@ -232,19 +385,22 @@ with tab_add:
         )
         col1, col2 = st.columns(2)
         with col1:
-            lat = st.number_input("Latitude",  value=52.0406, format="%.6f", step=0.0001)
+            lat = st.number_input("Latitude", key="new_tree_lat", format="%.6f", step=0.0001)
         with col2:
-            lng = st.number_input("Longitude", value=-0.7594, format="%.6f", step=0.0001)
-        photo = st.file_uploader("Upload a photo (optional)", type=["jpg", "jpeg", "png", "webp"])
+            lng = st.number_input("Longitude", key="new_tree_lng", format="%.6f", step=0.0001)
         submitted = st.form_submit_button("Add Tree", type="primary")
 
     if submitted:
-        if not name.strip():
-            st.error("Please enter a tree name.")
+        final_name = name.strip()
+        if not final_name and photo:
+            final_name = Path(photo.name).stem.replace("_", " ").replace("-", " ").strip()
+
+        if not final_name:
+            st.error("Please enter a tree name, or upload a photo to auto-name it.")
         else:
             image_bytes = compress_image(photo) if photo else None
-            add_tree(name.strip(), lat, lng, image_bytes, description.strip())
-            st.success(f"\u2705 '{name}' added to the map!")
+            add_tree(final_name, lat, lng, image_bytes, description.strip())
+            st.success(f"\u2705 '{final_name}' added to the map!")
             st.rerun()
 
 # ── Tab: Manage Trees ─────────────────────────────────────────────────────────
